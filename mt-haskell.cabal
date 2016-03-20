@@ -1,0 +1,28 @@
+name:                mt-haskell
+version:             0.1.0.0
+synopsis:            Monad Transformers (based on MT Step by Step paper)
+description:         Please see README.md
+homepage:            http://github.com/dzotokan/mt-haskell#readme
+license:             BSD3
+license-file:        LICENSE
+author:              Daniel S
+maintainer:          Daniel S
+copyright:           2016 Daniel S
+category:            Paper
+build-type:          Simple
+cabal-version:       >=1.10
+
+library
+  hs-source-dirs:      src
+  exposed-modules:     Transformers
+  build-depends:       base >= 4.7 && < 5
+  default-language:    Haskell2010
+  ghc-options:         -Wall -W
+  default-extensions:  RankNTypes
+                     , KindSignatures
+
+executable mt-haskell
+  hs-source-dirs:      src
+  main-is:             Main.hs
+  default-language:    Haskell2010
+  build-depends:       base >= 4.7 && < 5
