@@ -1,6 +1,7 @@
 module Transformers where
 
 import           Control.Monad.Identity
+import           Control.Monad.Error
 
 import           Data.Maybe
 import qualified Data.Map as Map
@@ -24,11 +25,20 @@ data Value = IntVal Integer
 -- Mapping from name to values
 type Env = Map.Map Name Value
 
--- Programs will be made out of expressions; results - out of values;
+envEmpty :: Env
+envEmpty = Map.empty
 
+envInsert :: Name -> Value -> Env -> Env
+envInsert = Map.insert
+
+envLookup :: Name -> Env -> Maybe Value
+envLookup = Map.lookup
+
+-- Programs will be made out of expressions; results - out of values;
+--------------------------------------------------------------------------------
 eval0 :: Env -> Exp -> Value
 eval0 env (Lit i) = IntVal i
-eval0 env (Var n) = fromJust (Map.lookup n env)
+eval0 env (Var n) = fromJust (envLookup n env)
 eval0 env (Plus e1 e2) = let IntVal i1 = eval0 env e1
                              IntVal i2 = eval0 env e2
                           in IntVal (i1 + i2)
@@ -36,17 +46,19 @@ eval0 env (Abs n e) = FunVal env n e
 eval0 env (App e1 e2) = let val1 = eval0 env e1
                             val2 = eval0 env e2
                          in case val1 of
-                              FunVal env' n body -> eval0 (Map.insert n val2 env') body
+                              FunVal env' n body -> eval0 (envInsert n val2 env') body
+
 
 -- Monadic version
+--------------------------------------------------------------------------------
 type Eval1 a = Identity a
 
 runEval1 :: Eval1 a -> a
-runEval1 ev = runIdentity ev
+runEval1 = runIdentity
 
-eval1 :: Env -> Exp -> Eval1 Value
+eval1 :: Monad m => Env -> Exp -> m Value
 eval1 env (Lit i) = return $ IntVal i
-eval1 env (Var n) = return $ fromJust $ Map.lookup n env
+eval1 env (Var n) = return $ fromJust $ envLookup n env
 eval1 env (Plus e1 e2) = do IntVal i1 <- eval1 env e1
                             IntVal i2 <- eval1 env e2
                             return $ IntVal (i1 + i2)
@@ -55,7 +67,30 @@ eval1 env (App e1 e2) = do val1 <- eval1 env e1
                            val2 <- eval1 env e2
                            case val1 of
                              FunVal env' n body ->
-                               eval1 (Map.insert n val2 env') body
+                               eval1 (envInsert n val2 env') body
+
+
+-- ErrorT
+--------------------------------------------------------------------------------
+type ErrorMsg = String
+type Eval2 a = ErrorT ErrorMsg Identity a
+
+runEval2 :: Eval2 a -> Either ErrorMsg a
+runEval2 = runIdentity . runErrorT
+
+-- Without error utilization
+eval2a :: Env -> Exp -> Eval2 Value
+eval2a env (Lit i) = return $ IntVal i
+eval2a env (Var n) = return $ fromJust $ envLookup n env
+eval2a env (Plus e1 e2) = do IntVal i1 <- eval2a env e1
+                             IntVal i2 <- eval2a env e2
+                             return $ IntVal (i1 + i2)
+eval2a env (Abs n e) = return $ FunVal env n e
+eval2a env (App e1 e2) = do val1 <- eval2a env e1
+                            val2 <- eval2a env e2
+                            case val1 of
+                              FunVal env' n body ->
+                                eval2a (envInsert n val2 env') body
 
 -- Example expression:
 -- 10 + ((\x -> x)(5 + 8))
