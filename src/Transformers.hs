@@ -1,10 +1,12 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ConstraintKinds #-}
 
 module Transformers where
 
 import           Control.Monad.Identity
 import           Control.Monad.Error
 import           Control.Monad.Reader
+import           Control.Monad.Writer
 import           Control.Monad.State
 
 import           Data.Maybe
@@ -202,10 +204,54 @@ eval4 (App e1 e2) = do tick
                          _ -> throwError "Type error in application"
 
 
+-- WriterT
+--------------------------------------------------------------------------------
+type Eval5 a = ReaderT Env (ErrorT String
+                           (WriterT [String]
+                           (StateT Integer Identity))) a
 
--- Example expression:
--- 10 + ((\x -> x)(5 + 8))
--- IntVal 23
-exampleExp :: Exp
-exampleExp = Lit 10 `Plus` (App (Abs "x" (Var "x")) (Lit 5 `Plus` Lit 8))
+-- | Conveniense constraint synonym
+type Eval5Stack s m =
+  (Num s, MonadState s m, MonadError String m, MonadReader Env m, MonadWriter [Name] m)
+
+runEval5 :: Env -> Integer -> Eval5 a -> ((Either String a, [String]), Integer)
+runEval5 env st ev =
+  runIdentity (runStateT (runWriterT (runErrorT (runReaderT ev env))) st)
+
+
+eval5 :: forall (m :: * -> *) s. Eval5Stack s m => Exp -> m Value
+eval5 (Lit i) = tick >> (return $ IntVal i)
+eval5 (Var n) = tick >> tell [n] >> (ask >>= \env -> maybe (errUnbound n) return $ envLookup n env)
+eval5 (Plus e1 e2) = do tick
+                        e1' <- eval5 e1
+                        e2' <- eval5 e2
+                        case (e1', e2') of
+                          (IntVal i1, IntVal i2) -> return $ IntVal (i1 + i2)
+                          _ -> throwError "Type error in addition"
+eval5 (Abs n e) = tick >> (ask >>= \env -> return $ FunVal env n e)
+eval5 (App e1 e2) = do tick
+                       val1 <- eval5 e1
+                       val2 <- eval5 e2
+                       case val1 of
+                         FunVal env' n body ->
+                           local (const (envInsert n val2 env')) (eval5 body)
+                         _ -> throwError "Type error in application"
+
+-- Example expressions
+--------------------------------------------------------------------------------
+echoLambda :: Exp
+echoLambda = Abs "x" (Var "x")
+
+doubleLambda :: Exp
+doubleLambda = Abs "x" ((Var "x") `Plus` (Var "x"))
+
+intPlus :: Integer -> Integer -> Exp
+intPlus i1 i2 = Lit i1 `Plus` Lit i2
+
+expApply :: Exp -> Exp -> Exp
+expApply e1 e2 = e1 `App` e2
+
+example1 :: Exp
+example1 = Lit 10 `Plus`
+  (doubleLambda `expApply` (echoLambda `expApply` (2 `intPlus` 2)))
 
