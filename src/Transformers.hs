@@ -237,6 +237,37 @@ eval5 (App e1 e2) = do tick
                            local (const (envInsert n val2 env')) (eval5 body)
                          _ -> throwError "Type error in application"
 
+-- I/O
+--------------------------------------------------------------------------------
+type Eval6 a = ReaderT Env (ErrorT String
+                           (WriterT [String]
+                           (StateT Integer IO))) a
+
+-- | Conveniense constraint synonym
+type Eval6Stack s m =
+  (Num s, MonadIO m, MonadState s m, MonadError String m, MonadReader Env m, MonadWriter [Name] m)
+
+runEval6 :: Env -> Integer -> Eval6 a -> IO ((Either String a, [String]), Integer)
+runEval6 env st ev = runStateT (runWriterT (runErrorT (runReaderT ev env))) st
+
+eval6 :: forall (m :: * -> *) s. Eval6Stack s m => Exp -> m Value
+eval6 (Lit i) = tick >> liftIO (print i) >> (return $ IntVal i)
+eval6 (Var n) = tick >> tell [n] >> (ask >>= \env -> maybe (errUnbound n) return $ envLookup n env)
+eval6 (Plus e1 e2) = do tick
+                        e1' <- eval6 e1
+                        e2' <- eval6 e2
+                        case (e1', e2') of
+                          (IntVal i1, IntVal i2) -> return $ IntVal (i1 + i2)
+                          _ -> throwError "Type error in addition"
+eval6 (Abs n e) = tick >> (ask >>= \env -> return $ FunVal env n e)
+eval6 (App e1 e2) = do tick
+                       val1 <- eval6 e1
+                       val2 <- eval6 e2
+                       case val1 of
+                         FunVal env' n body ->
+                           local (const (envInsert n val2 env')) (eval6 body)
+                         _ -> throwError "Type error in application"
+
 -- Example expressions
 --------------------------------------------------------------------------------
 echoLambda :: Exp
