@@ -5,6 +5,7 @@ module Transformers where
 import           Control.Monad.Identity
 import           Control.Monad.Error
 import           Control.Monad.Reader
+import           Control.Monad.State
 
 import           Data.Maybe
 import qualified Data.Map as Map
@@ -139,6 +140,37 @@ eval3 (App e1 e2) = do val1 <- eval3 e1
                        case val1 of
                          FunVal env' n body ->
                            local (const (envInsert n val2 env')) (eval3 body)
+                         _ -> throwError "Type error in application"
+
+-- StateT
+--------------------------------------------------------------------------------
+type Eval4 a = ReaderT Env (ErrorT String (StateT Integer Identity)) a
+
+runEval4 :: Env -> Integer -> Eval4 a -> (Either String a, Integer)
+runEval4 env st ev = runIdentity (runStateT (runErrorT (runReaderT ev env)) st)
+
+-- Increment a state `s` in a numeric state monad `m`
+tick :: (Num s, MonadState s m) => m ()
+tick = do st <- get
+          put (st + 1)
+
+-- Hiding the environment
+eval4 :: Exp -> Eval4 Value
+eval4 (Lit i) = tick >> (return $ IntVal i)
+eval4 (Var n) = tick >> (ask >>= \env -> maybe (errUnbound n) return $ envLookup n env)
+eval4 (Plus e1 e2) = do tick
+                        e1' <- eval4 e1
+                        e2' <- eval4 e2
+                        case (e1', e2') of
+                          (IntVal i1, IntVal i2) -> return $ IntVal (i1 + i2)
+                          _ -> throwError "Type error in addition"
+eval4 (Abs n e) = tick >> (ask >>= \env -> return $ FunVal env n e)
+eval4 (App e1 e2) = do tick
+                       val1 <- eval4 e1
+                       val2 <- eval4 e2
+                       case val1 of
+                         FunVal env' n body ->
+                           local (const (envInsert n val2 env')) (eval4 body)
                          _ -> throwError "Type error in application"
 
 -- Example expression:
