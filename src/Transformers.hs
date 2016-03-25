@@ -1,7 +1,10 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 module Transformers where
 
 import           Control.Monad.Identity
 import           Control.Monad.Error
+import           Control.Monad.Reader
 
 import           Data.Maybe
 import qualified Data.Map as Map
@@ -92,7 +95,8 @@ eval2a env (App e1 e2) = do val1 <- eval2a env e1
                               FunVal env' n body ->
                                 eval2a (envInsert n val2 env') body
 
-errUnbound :: String -> Eval2 a
+-- Note: FlexibleContexts extension allows this to be used under any monad
+-- i.e Eval2 & Eval3
 errUnbound n = throwError $ "Unbound variable: " ++ n
 
 -- With error catching
@@ -110,6 +114,32 @@ eval2b env (App e1 e2) = do val1 <- eval2b env e1
                             case val1 of
                               FunVal env' n body -> eval2b (envInsert n val2 env') body
                               _ -> throwError "Type error in application"
+
+eval2 = eval2b
+
+-- ReaderT
+--------------------------------------------------------------------------------
+type Eval3 a = ReaderT Env (ErrorT String Identity) a
+
+runEval3 :: Env -> Eval3 a -> Either ErrorMsg a
+runEval3 env ev = runIdentity $ runErrorT $ runReaderT ev env
+
+-- Hiding the environment
+eval3 :: Exp -> Eval3 Value
+eval3 (Lit i) = return $ IntVal i
+eval3 (Var n) = ask >>= \env -> maybe (errUnbound n) return $ envLookup n env
+eval3 (Plus e1 e2) = do e1' <- eval3 e1
+                        e2' <- eval3 e2
+                        case (e1', e2') of
+                          (IntVal i1, IntVal i2) -> return $ IntVal (i1 + i2)
+                          _ -> throwError "Type error in addition"
+eval3 (Abs n e) = ask >>= \env -> return $ FunVal env n e
+eval3 (App e1 e2) = do val1 <- eval3 e1
+                       val2 <- eval3 e2
+                       case val1 of
+                         FunVal env' n body ->
+                           local (const (envInsert n val2 env')) (eval3 body)
+                         _ -> throwError "Type error in application"
 
 -- Example expression:
 -- 10 + ((\x -> x)(5 + 8))
