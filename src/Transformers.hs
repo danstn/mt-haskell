@@ -125,7 +125,7 @@ type Eval3 a = ReaderT Env (ErrorT String Identity) a
 runEval3 :: Env -> Eval3 a -> Either ErrorMsg a
 runEval3 env ev = runIdentity $ runErrorT $ runReaderT ev env
 
--- Hiding the environment
+-- | eval3 - Hiding the environment
 eval3 :: Exp -> Eval3 Value
 eval3 (Lit i) = return $ IntVal i
 eval3 (Var n) = ask >>= \env -> maybe (errUnbound n) return $ envLookup n env
@@ -144,18 +144,46 @@ eval3 (App e1 e2) = do val1 <- eval3 e1
 
 -- StateT
 --------------------------------------------------------------------------------
-type Eval4 a = ReaderT Env (ErrorT String (StateT Integer Identity)) a
 
+-- | Eval4 - tuple with an Either and a State inside
+type Eval4 a = ReaderT Env (ErrorT String
+                           (StateT Integer Identity)) a
+
+-- >>> runEval4 envEmpty 0 $ eval4 (Lit 4)
+-- (Right (IntVal 4),1)
+--
+-- >>> runEval4 envEmpty 0 $ eval4 (Var "y")
+-- (Left "Unbound variable: y",1)
 runEval4 :: Env -> Integer -> Eval4 a -> (Either String a, Integer)
 runEval4 env st ev = runIdentity (runStateT (runErrorT (runReaderT ev env)) st)
+
+-- | Eval4' - Either a Left or tuple in a Right
+type Eval4' a = ReaderT Env (StateT Integer
+                            (ErrorT String Identity)) a
+
+-- >>> runEval4' envEmpty 0 $ eval4 (Lit 5)
+-- Right (IntVal 5,1)
+--
+-- >>> runEval4' envEmpty 0 $ eval4 (Var "y")
+-- Left "Unbound variable: y"
+runEval4' :: Env -> Integer -> Eval4' a -> Either String (a, Integer)
+runEval4' env st ev = runIdentity (runErrorT (runStateT (runReaderT ev env) st))
 
 -- Increment a state `s` in a numeric state monad `m`
 tick :: (Num s, MonadState s m) => m ()
 tick = do st <- get
           put (st + 1)
 
--- Hiding the environment
-eval4 :: Exp -> Eval4 Value
+-- | eval4
+-- Note: Polymorphic signature allows us to swap runners without having to change
+-- the evaluation function.
+--
+--
+-- >>> runEval4' envEmpty 0 $ eval4 (Var "y")
+-- Left "Unbound variable: y"
+eval4 :: forall (m :: * -> *) s.
+  (Num s, MonadState s m, MonadError String m, MonadReader Env m) =>
+  Exp -> m Value
 eval4 (Lit i) = tick >> (return $ IntVal i)
 eval4 (Var n) = tick >> (ask >>= \env -> maybe (errUnbound n) return $ envLookup n env)
 eval4 (Plus e1 e2) = do tick
@@ -172,6 +200,8 @@ eval4 (App e1 e2) = do tick
                          FunVal env' n body ->
                            local (const (envInsert n val2 env')) (eval4 body)
                          _ -> throwError "Type error in application"
+
+
 
 -- Example expression:
 -- 10 + ((\x -> x)(5 + 8))
