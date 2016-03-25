@@ -268,7 +268,42 @@ eval6 (App e1 e2) = do tick
                            local (const (envInsert n val2 env')) (eval6 body)
                          _ -> throwError "Type error in application"
 
--- Example expressions
+-- Final!!!
+--------------------------------------------------------------------------------
+type Eval a = ReaderT Env (ErrorT String
+                           (WriterT [String]
+                           (StateT Integer IO))) a
+type EvalStack s m =
+  (Num s, MonadIO m, MonadState s m, MonadError String m, MonadReader Env m, MonadWriter [Name] m)
+
+type EvalResult a = ((Either String a, [String]), Integer)
+
+runEval :: Env -> Integer -> Eval a -> IO (EvalResult a)
+runEval environment state evaluation =
+  runStateT (runWriterT (runErrorT (runReaderT evaluation environment))) state
+
+eval :: forall (m :: * -> *) s. EvalStack s m => Exp -> m Value
+eval (Lit i) = tick >> liftIO (print i) >> (return $ IntVal i)
+eval (Var n) = tick >> tell [n] >> (ask >>= \env -> maybe (errUnbound n) return $ envLookup n env)
+eval (Plus e1 e2) = do tick
+                       e1' <- eval e1
+                       e2' <- eval e2
+                       case (e1', e2') of
+                         (IntVal i1, IntVal i2) -> return $ IntVal (i1 + i2)
+                         _ -> throwError "Type error in addition"
+eval (Abs n e) = tick >> (ask >>= \env -> return $ FunVal env n e)
+eval (App e1 e2) = do tick
+                      val1 <- eval e1
+                      val2 <- eval e2
+                      case val1 of
+                        FunVal env' n body ->
+                          local (const (envInsert n val2 env')) (eval6 body)
+                        _ -> throwError "Type error in application"
+
+execute :: Exp -> IO (EvalResult Value)
+execute = (runEval envEmpty 0) . eval
+
+-- Example expressions, operators and abstractions 🎌
 --------------------------------------------------------------------------------
 echoLambda :: Exp
 echoLambda = Abs "x" (Var "x")
@@ -276,13 +311,18 @@ echoLambda = Abs "x" (Var "x")
 doubleLambda :: Exp
 doubleLambda = Abs "x" ((Var "x") `Plus` (Var "x"))
 
-intPlus :: Integer -> Integer -> Exp
-intPlus i1 i2 = Lit i1 `Plus` Lit i2
-
 expApply :: Exp -> Exp -> Exp
 expApply e1 e2 = e1 `App` e2
 
+(<~) :: Exp -> Exp -> Exp
+e1 <~ e2 = e1 `App` e2
+
+(~+~) :: Exp -> Exp -> Exp
+e1 ~+~ e2 = e1 `Plus` e2
+
+(-+-) :: Integer -> Integer -> Exp
+i1 -+- i2 = Lit i1 `Plus` Lit i2
+
 example1 :: Exp
-example1 = Lit 10 `Plus`
-  (doubleLambda `expApply` (echoLambda `expApply` (2 `intPlus` 2)))
+example1 = Lit (-10) ~+~ (doubleLambda <~ (echoLambda <~ (2 -+- 2)))
 
