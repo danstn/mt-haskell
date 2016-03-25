@@ -78,7 +78,7 @@ type Eval2 a = ErrorT ErrorMsg Identity a
 runEval2 :: Eval2 a -> Either ErrorMsg a
 runEval2 = runIdentity . runErrorT
 
--- Without error utilization
+-- Without error catching
 eval2a :: Env -> Exp -> Eval2 Value
 eval2a env (Lit i) = return $ IntVal i
 eval2a env (Var n) = return $ fromJust $ envLookup n env
@@ -91,6 +91,25 @@ eval2a env (App e1 e2) = do val1 <- eval2a env e1
                             case val1 of
                               FunVal env' n body ->
                                 eval2a (envInsert n val2 env') body
+
+errUnbound :: String -> Eval2 a
+errUnbound n = throwError $ "Unbound variable: " ++ n
+
+-- With error catching
+eval2b :: Env -> Exp -> Eval2 Value
+eval2b env (Lit i) = return $ IntVal i
+eval2b env (Var n) = maybe (errUnbound n) return $ envLookup n env
+eval2b env (Plus e1 e2) = do e1' <- eval2b env e1
+                             e2' <- eval2b env e2
+                             case (e1', e2') of
+                               (IntVal i1, IntVal i2) -> return $ IntVal (i1 + i2)
+                               _ -> throwError "Type error in addition"
+eval2b env (Abs n e) = return $ FunVal env n e
+eval2b env (App e1 e2) = do val1 <- eval2b env e1
+                            val2 <- eval2b env e2
+                            case val1 of
+                              FunVal env' n body -> eval2b (envInsert n val2 env') body
+                              _ -> throwError "Type error in application"
 
 -- Example expression:
 -- 10 + ((\x -> x)(5 + 8))
